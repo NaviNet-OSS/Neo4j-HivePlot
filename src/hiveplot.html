@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html>
+	<head>
+		<meta charset="utf-8" />
+		<title>Hive Plot</title>
+		<link href="styles/hiveplot.css" rel="stylesheet" />
+		<link href="//code.jquery.com/ui/1.10.4/themes/smoothness/jquery-ui.css" rel="stylesheet">
+		<script src="//code.jquery.com/jquery-1.10.2.js"></script>
+		<script src="//code.jquery.com/ui/1.10.4/jquery-ui.js"></script>
+	</head>
+	<body>
+		<div id="status"></div>
+		<div id="tabs">
+			<ul>
+				<li><a href="#tabs-0">Query</a></li>
+				<li><a href="#tabs-1">Nodes</a></li>
+				<li><a href="#tabs-2">Relationships</a></li>
+			</ul>
+			<div id="tabs-0">
+				<label for="txtUri">Base URI: </label><br /><input class="queryInput" id="txtUri" type="url" value="http://server:7474/db/data" /><br />
+				<label for="txtCypher">Cypher: </label><br /><textarea class="queryInput" id="txtCypher"></textarea><br />
+				<label for="txtParams">JSON Params: </label><br /><textarea class="queryInput" id="txtParams"></textarea><br /><br />
+				<input class="btnRunQuery" type="button" value="Run Query" /><img class="spinner" src="images/spinner.gif" />
+			</div>
+			<div id="tabs-1">
+				<p class="dirtyQuery"><input class="btnRunQuery" type="button" value="Run Query" /><img class="spinner" src="images/spinner.gif" /></p>
+				<p class="cleanQuery"><strong>Select node domains to be included in the plot, and how they should be labeled.</strong></p>
+				<div id="nodeDomain" class="cleanQuery"></div>
+			</div>
+			<div id="tabs-2">
+				<p class="dirtyQuery"><input class="btnRunQuery" type="button" value="Run Query" /><img class="spinner" src="images/spinner.gif" /></p>
+				<p class="cleanQuery"><strong>Select relationship domains to be included in the plot.</strong></p>
+				<div id="relDomain" class="cleanQuery"></div>
+			</div>
+		</div>
+		<div id="chart"></div>
+		<script src="//cdnjs.cloudflare.com/ajax/libs/d3/3.4.6/d3.min.js"></script>
+		<script src="//cdnjs.cloudflare.com/ajax/libs/jquery-cookie/1.4.1/jquery.cookie.min.js"></script>
+		<script src="scripts/neo4j-query/neo4j-query.js"></script>
+		<script src="scripts/hiveplot/hiveplot.js"></script>
+		<script src="scripts/hiveplot-page.js"></script>
+	</body>
+</html>

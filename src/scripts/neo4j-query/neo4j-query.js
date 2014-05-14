@@ -1,0 +1,299 @@
+/** @namespace Neo4j
+ *  @summary Provides classes for working with Neo4j graph database.
+ */
+if (typeof(Neo4j) == "undefined") Neo4j = {};
+
+
+/** @namespace Neo4j.Graph
+ *  @memberof Neo4j
+ *  @summary Contains classes to represent an object graph.
+ */
+
+/** @constructor Graph
+ *  @memberof Neo4j.Graph
+ *  @summary Represents a fully connected object graph.
+ *  @property {Array} nodes - The nodes of the graph, an array of type {@linkcode Neo4j.Graph.Node}.
+ *  @property {Array} relationships - The relationships of the graph, an array of type {@linkcode Neo4j.Graph.Relationship}.
+ *  @property {object} nodeIndex - An index of the nodes by URI.
+ *  @property {object} relationshipIndex - An index of the relationships by URI.
+ */
+if (typeof(Neo4j.Graph) == "undefined") Neo4j.Graph = {};
+Neo4j.Graph.Graph = function() {
+	this.nodes = [];
+	this.relationships = [];
+	this.nodeIndex = {};
+	this.relationshipIndex = {};
+}
+
+/** @constructor Node
+ *  @memberof Neo4j.Graph
+ *  @type {object}
+ *  @summary Represents a node in the object graph.
+ *  @property {string} uri - The URI of the node.
+ *  @property {string[]} labels - The labels of the node.
+ *  @property {Array} relationships - The relationships in which the node participates, an array of type {@linkcode Neo4j.Graph.Relationship}.
+ *  @property {string} domainKey - The domain of the node, a concatenation of all its labels.
+ *  @property {object} neoNode - The node as returned from the Neo4j REST API.
+ */
+ Neo4j.Graph.Node = function() {
+	this.uri = null;
+	this.labels = null;
+	this.relationships = [];
+	this.neoNode = null;
+	this.domainKey = null;
+}
+
+/** @constructor Relationship
+ *  @memberof Neo4j.Graph
+ *  @type {object}
+ *  @summary Represents a relationship in the object graph.
+ *  @property {string} uri - The URI of the relationship.
+ *  @property {Neo4j.Graph.Node} startNode - The starting node of the relationship.
+ *  @property {Neo4j.Graph.Node} endNode - The ending node of the relationship.
+ *  @property {string} type - The relationship type.
+ *  @property {string} domainKey - The domain of the relationship, a concatenation of the domainKey
+ *                                 of the startNode and the endNode with the relationship type.
+ *  @property {object} neoRelationship - The relationship as returned from the Neo4j REST API.
+ */
+Neo4j.Graph.Relationship = function() {
+	this.uri = null;
+	this.startNode = null;
+	this.endNode = null;
+	this.type = null;
+	this.neoRelationship = null;
+	this.domainKey = null;
+}
+
+/** @namespace Neo4j.Query
+ *  @memberof Neo4j
+ *  @summary Retrieves graph data from Neo4j and outputs a fully connected object {@link Neo4j.Graph.Graph}.
+ *  @description The Neo4j object retrieves graph data from a the Neo4j REST API using a provided
+ *    {@link http://docs.neo4j.org/chunked/stable/cypher-query-lang.html|Cypher Query}.
+ *    The query may be parameterized. The resulting data is returned in a fully connected
+ *    object {@link Neo4j.Graph.Graph}.
+ */
+
+/** @callback successCallback
+ *  @memberof Neo4j.Query
+ *  @param {Neo4j.Graph.Graph} graph - The fully connected object graph resulting from the query.
+ */
+
+/** @callback errorCallback
+ *  @memberof Neo4j.Query
+ *  @param {string} err - The error message.
+ */
+
+Neo4j.Query = (function() {
+	var _graph = new Neo4j.Graph.Graph();
+	var _dataUri, _cypherQuery, _queryParams, _successFn;
+	var _errorFn = function() {};
+	var _cypherResult = null;
+	var _labelIndex = {};
+	var _cypherResultIndex = {};
+
+	function _setOptions(args) {
+		if (args["dataUri"]) _dataUri = args.dataUri;
+		if (args["cypherQuery"]) _cypherQuery = args.cypherQuery;
+		if (args["queryParams"]) _queryParams = args.queryParams;
+		if (args["success"]) _successFn = args.success;
+		if (args["error"]) _errorFn = args.error; 
+	}	
+	
+	function _assertValidOptions() {
+		if (!_dataUri || _dataUri.length == 0) {
+			throw "dataUri argument not defined";
+		}
+		
+		if (!_successFn || typeof(_successFn) != 'function') {
+			throw "success argument not set to a function";
+		}
+	}
+		
+	function _runQuery(args) {
+		_setOptions(args);
+		_assertValidOptions();
+
+		if (!_cypherQuery || _cypherQuery.length == 0) {
+			_cypherQuery = 'match (s)-[r]->(t) return s,r,t limit 100;';
+		}
+		
+		if (!_queryParams) {
+			_queryParams = {};
+		}
+
+		
+		_graph = new Neo4j.Graph.Graph();
+
+
+		$.ajax({
+			url: _dataUri + '/cypher', //'http://dvifrulept01.navimedix.com:7474/db/data/cypher',
+			accepts: 'application/json; charset=UTF-8',
+			dataType: 'json',
+			data: {
+				'query' : _cypherQuery,
+				'params' : _queryParams
+			},
+			type:'POST',
+			success:function(data,xhr,status) {
+				_processCypherResult(data);
+			},
+			error:function(xhr,err,msg) {
+				console.log(xhr);
+				console.log(err);
+				console.log(msg);
+				_errorFn(err);
+			}
+		});
+
+
+		
+	}
+
+	function _processCypherResult(result) {
+		_cypherResult = result.data;
+		_cypherResultIndex = {};
+		_labelIndex = {};
+		var requestId = 0;
+		var batch = [];
+		
+		//prepare batch to get all node labels
+		for (var i = 0; i < _cypherResult.length; i++) {
+			
+			for (var j = 0; j < _cypherResult[i].length; j++) {
+				var resultItem = _cypherResult[i][j];
+				_cypherResultIndex[resultItem.self] = resultItem;
+				
+				//skip relationships
+				if (resultItem.self.indexOf("db/data/relationship") > -1) continue;
+
+				var uri = resultItem.labels.replace(_dataUri, '');
+				if (_labelIndex[uri]) continue;
+				
+				_labelIndex[uri] = "";
+				
+				var batchItem = {
+					method: "GET",
+					to: uri,
+					id: requestId++
+				};
+				
+				batch.push(batchItem);
+			}
+		}
+		
+		if (batch.length == 0) {
+			_errorFn("Cypher returned no node data");
+			return;
+		}
+		
+		if (batch.length > 0) {
+			$.ajax({
+				url: _dataUri + '/batch',
+				accepts: 'application/json; charset=UTF-8',
+				dataType: 'json',
+				data: JSON.stringify(batch),
+				type:'POST',
+				success:function(data,xhr,status)
+				{
+					_processLabelResult(data);
+				},
+				error:function(xhr,err,msg){
+					console.log(xhr);
+					console.log(err);
+					console.log(msg);
+					_errorFn(err);
+				}
+			});			
+		}
+	}
+	
+	function _processLabelResult(data) {
+	
+		for (var i = 0; i < data.length; i++) {
+			_labelIndex[data[i].from] = data[i].body;
+		}
+
+		_connectGraph();
+		
+	}
+
+	
+	function _getNodeDomainKey(node) {
+		return node.labels.join("-");
+	}
+
+	function _getRelDomainKey(rel) {
+		return _getNodeDomainKey(rel.startNode) + "--" + rel.type + "--" + _getNodeDomainKey(rel.endNode);
+	}
+	
+	function _connectGraph() {
+	
+		//pass through results to collect all nodes
+		for (var i = 0; i < _cypherResult.length; i++) {
+			for (var j = 0; j < _cypherResult[i].length; j++) {
+				var resultItem = _cypherResult[i][j];
+			
+				//ignore relationships for now
+				if (resultItem.self.indexOf("db/data/relationship") > -1) continue;
+
+				if (_graph.nodeIndex[resultItem.self]) continue;
+				
+				var labelKey = _cypherResultIndex[resultItem.self].labels.replace(_dataUri,'');
+				var labels = _labelIndex[labelKey];
+				
+				var node = new Neo4j.Graph.Node();
+				node.uri = resultItem.self;
+				node.labels = labels;
+				node.neoNode = resultItem;
+				node.domainKey = _getNodeDomainKey(node);
+
+				_graph.nodes.push(node);
+				_graph.nodeIndex[node.uri] = node;
+			}
+		}
+
+		//pass through results to collect and connect relationships
+		for (var i = 0; i < _cypherResult.length; i++) {
+			for (var j = 0; j < _cypherResult[i].length; j++) {
+				var resultItem = _cypherResult[i][j];
+			
+				//ignore nodes
+				if (resultItem.self.indexOf("db/data/relationship") == -1) continue;
+				
+				if (_graph.relationshipIndex[resultItem.self]) continue;
+				
+				var startNode = _graph.nodeIndex[resultItem.start];
+				var endNode = _graph.nodeIndex[resultItem.end];
+				
+				var rel = new Neo4j.Graph.Relationship();
+				rel.uri = resultItem.self;
+				rel.startNode = startNode;
+				rel.endNode = endNode;
+				rel.type = resultItem.type;
+				rel.neoRelationship = resultItem;
+				rel.domainKey = _getRelDomainKey(rel);
+				
+				_graph.relationships.push(rel);
+				_graph.relationshipIndex[rel.uri] = rel;
+				startNode.relationships.push(rel);
+				endNode.relationships.push(rel);
+			}
+		}
+		
+		_successFn(_graph);
+	}
+
+	
+	return {
+		/** @function runQuery
+		 *  @memberof Neo4j.Query
+		 *  @summary Runs a cypher query against a Neo4j graph database.
+		 *  @param {string} dataUri - The URI of the Neo4j database, for example: 'http://neo4jhost.com:7474/db/data'
+		 *  @param {string} [cypherQuery=see description] - The cypher query to run. Default: 'match (s)-[r]->(t) return s,r,t limit 100;'
+		 *  @param {object} [queryParams={}] - The query parameters.
+		 *  @param {Neo4j.Query.successCallback} success - The function to call with successful result.
+		 *  @param {Neo4j.Query.errorCallback} error - The function to call in case of error.
+		 */
+		runQuery: _runQuery,
+	};
+})();

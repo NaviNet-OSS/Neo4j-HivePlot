@@ -1,0 +1,1 @@
+jsdoc -d .\doc src\scripts\hiveplot\hiveplot.js src\scripts\neo4j-query\neo4j-query.js

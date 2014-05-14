@@ -1,0 +1,532 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>JSDoc: Source: hiveplot/hiveplot.js</title>
+
+    <script src="scripts/prettify/prettify.js"> </script>
+    <script src="scripts/prettify/lang-css.js"> </script>
+    <!--[if lt IE 9]>
+      <script src="//html5shiv.googlecode.com/svn/trunk/html5.js"></script>
+    <![endif]-->
+    <link type="text/css" rel="stylesheet" href="styles/prettify-tomorrow.css">
+    <link type="text/css" rel="stylesheet" href="styles/jsdoc-default.css">
+</head>
+
+<body>
+
+<div id="main">
+
+    <h1 class="page-title">Source: hiveplot/hiveplot.js</h1>
+
+    
+
+
+    
+    <section>
+        <article>
+            <pre class="prettyprint source linenums"><code>/** 
+ * @namespace HivePlot
+ * @summary Plot nodes and relationships of an object graph in a {@link http://bost.ocks.org/mike/hive/|Hive Plot}.
+ * @description The HivePlot object plots nodes and relationships of an object graph in a 
+ *   {@link http://bost.ocks.org/mike/hive/|Hive Plot}. It accepts as arguments a graph,
+ *   a description of a set of nodes and relationships within that graph and a
+ *   target DOM document container for a the hive plot visualization.
+ */
+if (typeof(HivePlot) == "undefined") HivePlot = {};
+
+/**
+ * @callback getNodeNameCallback
+ * @memberof HivePlot
+ * @param {object} node - The node object whose name is to be returned.
+ * @param {integer} index - The index number of the node within the data set to be plotted.
+ * @returns {string} - The name of the node for display purposes.
+ */
+
+ /**
+  * @callback getNodeLabelCallback
+  * @memberof HivePlot
+  * @param {object} node - The node object whose label is to be returned.
+  * @returns {string} - The label of the node for display purposes.
+  */
+
+ /**
+  * @callback getRelationshipType
+  * @memberof HivePlot
+  * @param {object} relationship - The relationship object whose type is to be returned.
+  * @param {integer} index - The index number of the relationship within the data set to be plotted.
+  * @returns {string} - The relationship type for display purposes.
+  */
+
+/**
+ * @class Plotter
+ * @memberof HivePlot
+ * @fires HivePlot#nodeMouseover
+ * @fires HivePlot#nodeMouseout
+ * @fires HivePlot#linkMouseover
+ * @fires HivePlot#linkMouseout
+ */
+HivePlot.Plotter = (function() {
+	var _graph;
+	var _nodeDomain;
+	var _relDomain;
+	var _nodeColorFn;
+	var _linkColorFn;
+	var _containerSelector;
+	var _nodeNameFn;
+	var _nodeLabelFn;
+	var _relTypeFn;
+	var _plotData = new _PlotData();
+
+	// object to hold data to be plotted
+	function _PlotData() {
+		this.nodes = [];
+		this.links = [];
+		this.nodesByUri = {};
+		this.nodesByDomainKey = [];
+		this.nodeDomain = [];
+		this.relDomain = [];
+	}
+
+	// main function for drawing the plot
+	function _draw(args) {
+		
+		_setArgs(args);
+	
+		_setPlotData();
+
+		_drawPlot();
+
+	}
+
+
+	// parse arguments and store in member variables
+	function _setArgs(args) {
+		if (args["graph"]) _graph = args["graph"];
+		if (args["nodeDomain"]) _nodeDomain = args["nodeDomain"];
+		if (args["relationshipDomain"]) _relDomain = args["relationshipDomain"];
+		if (args["containerSelector"]) _containerSelector = args["containerSelector"];
+		if (args["getNodeName"]) _nodeNameFn = args["getNodeName"];
+		if (args["getNodeLabel"]) _nodeLabelFn = args["getNodeLabel"];
+		if (args["getRelationshipType"]) _relTypeFn = args["getRelationshipType"];
+	}
+
+
+	// setup the plot data in preparation for plotting
+	function _setPlotData() {
+
+		_plotData = new _PlotData();
+				
+		// Get graph nodes that are to be included in the plot,
+		// only those in the "nodeDomain" array.
+		var index = 0;
+		_graph.nodes.forEach(function(node) {
+			if (_nodeDomain.indexOf(node.domainKey) > -1) {
+				var plotNode = {
+					graphNode: node,
+					name: _getNodeName(node, index++),
+					type: _getNodeLabel(node),
+					domainKey: node.domainKey
+				};
+				_plotData.nodesByUri[node.uri] = plotNode;	
+				_plotData.nodes.push(plotNode);
+			}
+		});
+
+		// Get a friendly name for the node, or construct one
+		function _getNodeName(node, index) {
+			
+			// If caller supplied a function, then return the result.
+			if (typeof(_nodeNameFn) == "function") return _nodeNameFn(node);
+
+			// If node has a name already, then return it.
+			if (node.name) return node.name;
+
+			// Otherwise construct the name from the domain and the index
+			return node.domainKey + " " + index;
+		}
+
+		// Get a friendly name for the node type
+		function _getNodeLabel(node) {
+	
+			if (typeof(_nodeLabelFn) == "function") return _nodeLabelFn(node);
+
+			return node.domainKey;
+
+		}
+
+		// Convert the import relationships into links with sources and targets.
+		index = 0;
+		_graph.relationships.forEach(function(rel) {
+			if (_relDomain.indexOf(rel.domainKey) > -1) {
+				var source = _plotData.nodesByUri[rel.startNode.uri];
+				var target = _plotData.nodesByUri[rel.endNode.uri];
+				var drawRel = {
+					graphRel: rel,
+					source: source, 
+					target: target, 
+					type: _getRelType(rel, index++), 
+					domainKey: rel.domainKey
+				};
+				_plotData.links.push(drawRel);
+			}
+		});
+		_plotData.relDomain = _relDomain;
+		
+		// Get a friendly name for the relationship type
+		function _getRelType(rel, index) {
+			if (typeof(_relTypeFn) == "function") return _relTypeFn(rel, index);
+			return rel.type;
+		}
+
+		// sort so that nodes with more relationships appear toward outer edge of plot
+		_plotData.nodes.sort(function(a,b) {
+			if (a &amp;&amp; b) {
+				return a.graphNode.relationships.length - b.graphNode.relationships.length;
+			}
+			return 0;
+		});
+
+		// Construct a map that groups nodes by domainKey (type)
+		_plotData.nodesByDomainKey = d3.nest()
+			.key(function(d) { return d.domainKey; })
+			.entries(_plotData.nodes);
+			
+		// Add an index value for each node in each group. This determines
+		// how far out from the center the node will be plotted.
+		_plotData.nodesByDomainKey.forEach(function(domainKey) {
+			var count = 0;
+			domainKey.values.forEach(function(d, i) {
+				d.index = count++;
+			});
+			domainKey.count = count;
+		});
+
+		// Sort the node domains by count so that axes with more nodes appear at twelve o'clock
+		_plotData.nodesByDomainKey.sort(function(a,b) {
+			return b.count - a.count;
+		});
+
+		// Store an array of sorted node domainKeys in the plot data.
+		_plotData.nodesByDomainKey.forEach(function(domainKey) {
+			_plotData.nodeDomain.push(domainKey.key);
+		});
+	}
+
+
+	// draw the plot in the user-specified container
+	function _drawPlot() {
+
+		// make sure we have a valid container
+		if (document.querySelector(_containerSelector) == null) {
+			throw "containerSelector '" + _containerSelector + "' does not select a DOM element";
+		}
+
+		// set up basic dimensions
+		var width = document.documentElement.clientWidth - 20;
+		var height = document.documentElement.clientHeight - 65;
+		var innerRadius = 40;
+		var outerRadius = Math.min(height,width)/2 - 10;
+
+		var radius = d3.scale.linear().range([innerRadius, outerRadius]);
+		radius.domain(d3.extent(_plotData.nodes, function(d) { return d.index; }));
+
+		var range = [];
+		var rangeAngle = 2 * Math.PI / _plotData.nodeDomain.length;
+		for (var i=0; i &lt; _plotData.nodeDomain.length; i++) {
+			range.push(i * rangeAngle);
+		}	
+
+		var angle = d3.scale.ordinal()
+			.domain(_plotData.nodeDomain)
+			.range(range);
+
+		// setup color series for nodes and relationships
+		if (_plotData.nodeDomain.length &lt;= 10) {
+			_nodeColorFn = d3.scale.category10().domain(_plotData.nodeDomain);
+		}
+		else {
+			_nodeColorFn = d3.scale.category20().domain(_plotData.nodeDomain);
+		}
+		
+		if (_plotData.relDomain.length &lt;= 10) {
+			_linkColorFn = d3.scale.category10().domain(_plotData.relDomain);
+		}
+		else {
+			_linkColorFn = d3.scale.category20().domain(_plotData.relDomain);
+		}
+		
+		// remove any previous plot in the container, and build a new one
+		document.querySelector(_containerSelector).innerHTML = "";
+		var svg = d3.select(_containerSelector).append("svg")
+			.attr("width", width)
+			.attr("height", height)
+		  .append("g")
+			.attr("transform", "translate(" + width/2 + "," + height/2 + ")"); //translate to center
+		
+		// Draw the axes.
+		svg.selectAll(".axis")
+		  .data(_plotData.nodesByDomainKey)
+		.enter().append("line")
+		  .attr("class", "axis")
+		  .attr("transform", function(d) { return "rotate(" + _degrees(angle(d.key)) + ")"; })
+		  .attr("x1", radius(-2))
+		  .attr("x2", function(d) { return radius(d.count + 1); });
+
+		// Draw the links.
+		svg.append("g")
+		  .attr("class", "links")
+		.selectAll(".link")
+		  .data(_plotData.links)
+		.enter().append("path")
+		  .attr("class", "link")
+		  .attr("stroke", function(d) { return _linkColorFn(d.domainKey); })
+		  .attr("d", link()
+		    .angle(function(d) { return angle(d.domainKey); })
+		    .radius(function(d) { return radius(d.index); }))
+		  .on("mouseover", linkMouseover)
+		  .on("mouseout", linkMouseout);
+
+		// Draw the nodes.
+		svg.append("g")
+		  .attr("class", "nodes")
+		.selectAll(".node")
+		  .data(_plotData.nodes)
+		.enter().append("g")
+		  .attr("class", "node")
+		  .style("fill", function(d) { return _nodeColorFn(d.domainKey); })
+		.append("circle")
+		  .attr("transform", getNodeTransform)
+		  .attr("cx", function(d) { return radius(d.index); })
+		  .attr("r", 4)
+		  .on("mouseover", nodeMouseover)
+		  .on("mouseout", nodeMouseout);
+
+		function getNodeTransform(d) {
+			var f = "rotate(" + _degrees(angle(d.domainKey)) + ")";
+			return f;	  
+		}
+
+		/**
+		 * @event HivePlot#linkMouseover
+		 * @param {Neo4j.Graph.Relationship} relationship - the graph relationship represented by the link that the mouse has moved over.
+		 */
+		function linkMouseover(d) {
+			var svg = d3.select(_containerSelector).select("svg");
+			svg.selectAll(".link").classed("active", function(p) { return p === d; });
+			svg.selectAll(".node circle").classed("active", function(p) { return p === d.source || p === d.target; });
+			$(_containerSelector).trigger("linkMouseover", d.graphRel);
+		}
+
+		/**
+		 * @event HivePlot#linkMouseout
+		 * @param {Neo4j.Graph.Relationship} relationship - the graph relationship represented by the link that the mouse has moved out of.
+		 */
+		function linkMouseout(d) {
+			mouseout();
+			$(_containerSelector).trigger("linkMouseout", d.graphRel);
+		}
+		
+		/**
+		 * @event HivePlot#nodeMouseover
+		 * @param {Neo4j.Graph.Node} node - the graph node represented by the node that the mouse has moved over.
+		 */
+		function nodeMouseover(d) {
+			var svg = d3.select(_containerSelector).select("svg")
+			svg.selectAll(".link").classed("active", function(p) { return p.source === d || p.target === d; });
+			d3.select(this).classed("active", true);
+			$(_containerSelector).trigger("nodeMouseover", d.graphNode);
+		}
+
+		/**
+		 * @event HivePlot#nodeMouseout
+		 * @param {Neo4j.Graph.Node} node - the graph node represented by the node that the mouse has moved out of.
+		 */
+		function nodeMouseout(d) {
+			mouseout();
+			$(_containerSelector).trigger("nodeMouseout", d.graphNode);
+		}
+		
+		function mouseout() {
+			svg.selectAll(".active").classed("active", false);
+		}
+
+		// A shape generator for Hive links, based on a source and a target.
+		// The source and target are defined in polar coordinates (angle and radius).
+		// Ratio links can also be drawn by using a startRadius and endRadius.
+		// This class is modeled after d3.svg.chord.
+		function link() {
+		  var source = function(d) { 
+						return d.source; 
+			  },
+			  target = function(d) { 
+						return d.target; 
+			  },
+			  angle = function(d) { return d.angle; },
+			  startRadius = function(d) { return d.radius; },
+			  endRadius = startRadius,
+			  arcOffset = -Math.PI / 2;
+
+		  function link(d, i) {
+			var s = node(source, this, d, i),
+				t = node(target, this, d, i),
+				x;
+			if (t.a &lt; s.a) x = t, t = s, s = x;
+			if (t.a - s.a > Math.PI) s.a += 2 * Math.PI;
+			var a1 = s.a + (t.a - s.a) / 3,
+				a2 = t.a - (t.a - s.a) / 3;
+			return s.r0 - s.r1 || t.r0 - t.r1
+				? "M" + Math.cos(s.a) * s.r0 + "," + Math.sin(s.a) * s.r0
+				+ "L" + Math.cos(s.a) * s.r1 + "," + Math.sin(s.a) * s.r1
+				+ "C" + Math.cos(a1) * s.r1 + "," + Math.sin(a1) * s.r1
+				+ " " + Math.cos(a2) * t.r1 + "," + Math.sin(a2) * t.r1
+				+ " " + Math.cos(t.a) * t.r1 + "," + Math.sin(t.a) * t.r1
+				+ "L" + Math.cos(t.a) * t.r0 + "," + Math.sin(t.a) * t.r0
+				+ "C" + Math.cos(a2) * t.r0 + "," + Math.sin(a2) * t.r0
+				+ " " + Math.cos(a1) * s.r0 + "," + Math.sin(a1) * s.r0
+				+ " " + Math.cos(s.a) * s.r0 + "," + Math.sin(s.a) * s.r0
+				: "M" + Math.cos(s.a) * s.r0 + "," + Math.sin(s.a) * s.r0
+				+ "C" + Math.cos(a1) * s.r1 + "," + Math.sin(a1) * s.r1
+				+ " " + Math.cos(a2) * t.r1 + "," + Math.sin(a2) * t.r1
+				+ " " + Math.cos(t.a) * t.r1 + "," + Math.sin(t.a) * t.r1;
+		  }
+
+		  function node(method, thiz, d, i) {
+			var node = method.call(thiz, d, i),
+				a = +(typeof angle === "function" ? angle.call(thiz, node, i) : angle) + arcOffset,
+				r0 = +(typeof startRadius === "function" ? startRadius.call(thiz, node, i) : startRadius),
+				r1 = (startRadius === endRadius ? r0 : +(typeof endRadius === "function" ? endRadius.call(thiz, node, i) : endRadius));
+			return {r0: r0, r1: r1, a: a};
+		  }
+
+		  link.source = function(_) {
+			if (!arguments.length) return source;
+			source = _;
+			return link;
+		  };
+
+		  link.target = function(_) {
+			if (!arguments.length) return target;
+			target = _;
+			return link;
+		  };
+
+		  link.angle = function(_) {
+			if (!arguments.length) return angle;
+			angle = _;
+			return link;
+		  };
+
+		  link.radius = function(_) {
+			if (!arguments.length) return startRadius;
+			startRadius = endRadius = _;
+			return link;
+		  };
+
+		  link.startRadius = function(_) {
+			if (!arguments.length) return startRadius;
+			startRadius = _;
+			return link;
+		  };
+
+		  link.endRadius = function(_) {
+			if (!arguments.length) return endRadius;
+			endRadius = _;
+			return link;
+		  };
+
+		  return link;
+		}
+
+	}
+
+	function _degrees(radians) {
+	  return radians / Math.PI * 180 - 90;
+	}
+
+	function _getNodeColor(key) {
+		return _nodeColorFn(key);
+	}
+	
+	function _getRelationshipColor(key) {
+		return _linkColorFn(key);
+	}
+
+	function _getNodeCount() {
+		return _plotData.nodes.length;
+	}
+	
+	function _getRelationshipCount() {
+		return _plotData.links.length;
+	}
+	
+	return {
+		/** @function draw
+		 *  @memberof HivePlot.Plotter
+		 *  @summary Draw the hive plot based on the provided arguments.
+		 *  @param {object} args - The arguments that describe the plot to be drawn.
+		 *  @param {Neo4j.Graph.Graph} args.graph - The object graph containing the data to be plotted.
+		 *  @param {string[]} args.nodeDomain - The list of node domain keys to be included in the plot.
+		 *  @param {string[]} args.relationshipDomain - The list of relationship domain keys to be included in the plot.
+		 *  @param {string} args.containerSelector - The DOM selector for the DOM element that is to contain the plot.
+		 *                                           Note that all HTML content in this container will be deleted.
+		 *  @param {HivePlot.getNodeNameCallback} [args.getNodeName] - The callback function to get the display name of each node.
+		 *                                                             If omitted, the node domain key and index number will be used.
+		 *  @param {HivePlot.getNodeLabelCallback} [args.getNodeLabel] - The callback function to get the display label of each node.
+		 *                                                               If omitted, the node domain key will be used.
+		 *  @param {HivePlot.getRelationshipType} [args.getRelationshipType] - The callback function to get the display name of the 
+		 *                                                                     relationship type. If omitted, the type indicated in the
+		 *                                                                     graph will be used.
+		 */
+		draw: _draw,
+		/** @function getNodeColor
+		 *  @memberof HivePlot.Plotter
+		 *  @summary Get the hex color code of the given node domain key in the plot.
+		 *  @param {string} domainKey - The domain key of the node to get the color for.
+		 *  @returns {string} - The hex color code of the given node domain key.
+		 */
+		getNodeColor: _getNodeColor,
+		/** @function getRelationshipColor
+		 *  @memberof HivePlot.Plotter
+		 *  @summary Get the hex color code of the given relationship domain key in the plot.
+		 *  @param {string} domainKey - The domain key of the relationship to get the color for.
+		 *  @returns {string} - The hex color code of the given relationship domain key.
+		 */
+		getRelationshipColor: _getRelationshipColor,
+		/** @function getNodeCount
+		 *  @memberof HivePlot.Plotter
+		 *  @summary Get the count of the nodes in the plot.
+		 *  @returns {integer} The number of nodes in the plot.
+		 */
+		getNodeCount: _getNodeCount,
+		/** @function getRelationshipCount
+		 *  @memberof HivePlot.Plotter
+		 *  @summary Get the count of relationships in the plot.
+		 *  @returns {integer} The number of relationships in the plot.
+		 */
+		getRelationshipCount: _getRelationshipCount,
+	};
+})();
+</code></pre>
+        </article>
+    </section>
+
+
+
+
+</div>
+
+<nav>
+    <h2><a href="index.html">Index</a></h2><h3>Classes</h3><ul><li><a href="HivePlot.Plotter.html">Plotter</a></li><li><a href="Neo4j.Graph.Graph.html">Graph</a></li><li><a href="Neo4j.Graph.Node.html">Node</a></li><li><a href="Neo4j.Graph.Relationship.html">Relationship</a></li></ul><h3>Events</h3><ul><li><a href="HivePlot.html#event:linkMouseout">linkMouseout</a></li><li><a href="HivePlot.html#event:linkMouseover">linkMouseover</a></li><li><a href="HivePlot.html#event:nodeMouseout">nodeMouseout</a></li><li><a href="HivePlot.html#event:nodeMouseover">nodeMouseover</a></li></ul><h3>Namespaces</h3><ul><li><a href="HivePlot.html">HivePlot</a></li><li><a href="Neo4j.html">Neo4j</a></li><li><a href="Neo4j.Graph.html">Graph</a></li><li><a href="Neo4j.Query.html">Query</a></li></ul>
+</nav>
+
+<br clear="both">
+
+<footer>
+    Documentation generated by <a href="https://github.com/jsdoc3/jsdoc">JSDoc 3.3.0-alpha5</a> on Wed May 14 2014 13:21:39 GMT-0400 (Eastern Daylight Time)
+</footer>
+
+<script> prettyPrint(); </script>
+<script src="scripts/linenumber.js"> </script>
+</body>
+</html>
